@@ -1,8 +1,15 @@
 <!DOCTYPE html>
+
 <html>
 <head>
+  <meta charset="UTF-8">
   <title>Verifying…</title>
+
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       font-family: sans-serif;
       display: flex;
@@ -14,64 +21,256 @@
       color: #fff;
       margin: 0;
     }
+
+    /*
+     * Fixed-size area for the message.
+     * This prevents the page from shifting when
+     * the text changes.
+     */
+    .message-container {
+      width: 100%;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #msg {
+      margin: 0;
+      text-align: center;
+    }
+
+    /*
+     * Loader
+     */
     .loader {
       margin-top: 20px;
       width: 40px;
       height: 40px;
+
       border: 4px solid transparent;
       border-top: 4px solid #00ffff;
       border-radius: 50%;
-      animation: spin 1s linear infinite, pulseColor 6s linear infinite;
+
+      animation:
+        spin 1s linear infinite,
+        pulseColor 6s linear infinite;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @keyframes pulseColor {
-      0%{border-top-color:#00ffff;}
-      20%{border-top-color:#ff00ff;}
-      40%{border-top-color:#ffff00;}
-      60%{border-top-color:#00ff00;}
-      80%{border-top-color:#ff4500;}
-      100%{border-top-color:#1e90ff;}
-    }
+
+    /*
+     * Error X
+     */
     .denied {
       display: none;
+
+      width: 40px;
+      height: 40px;
+      margin-top: 20px;
+
       font-size: 80px;
-      color: red;
+      line-height: 35px;
+      text-align: center;
+
       font-weight: bold;
+
+      /*
+       * The X uses the same color animation
+       * as the loading spinner.
+       */
+      animation: pulseXColor 6s linear infinite;
+
+      text-shadow:
+        0 0 5px currentColor,
+        0 0 10px currentColor,
+        0 0 20px currentColor,
+        0 0 40px currentColor;
+    }
+
+    /*
+     * Turnstile container
+     */
+    .turnstile-container {
       margin-top: 20px;
     }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /*
+     * Spinner colors
+     */
+    @keyframes pulseColor {
+      0% {
+        border-top-color: #00ffff;
+      }
+
+      20% {
+        border-top-color: #ff00ff;
+      }
+
+      40% {
+        border-top-color: #ffff00;
+      }
+
+      60% {
+        border-top-color: #00ff00;
+      }
+
+      80% {
+        border-top-color: #ff4500;
+      }
+
+      100% {
+        border-top-color: #1e90ff;
+      }
+    }
+
+    /*
+     * X colors
+     */
+    @keyframes pulseXColor {
+      0% {
+        color: #00ffff;
+      }
+
+      20% {
+        color: #ff00ff;
+      }
+
+      40% {
+        color: #ffff00;
+      }
+
+      60% {
+        color: #00ff00;
+      }
+
+      80% {
+        color: #ff4500;
+      }
+
+      100% {
+        color: #1e90ff;
+      }
+    }
   </style>
+
 </head>
 
 <body>
-  <h2 id="msg">Making sure you’re not a bot…</h2>
+
+  <div class="message-container">
+    <h2 id="msg">Making sure you’re not a bot…</h2>
+  </div>
+
   <div class="loader" id="spinner"></div>
+
   <div class="denied" id="error-x">×</div>
 
-  <!-- Cloudflare Turnstile -->
-  <div class="cf-turnstile" 
-       data-sitekey="0x4AAAAAACGINCrrNuJt2Mlw" 
-       data-callback="onHuman"
-       data-error-callback="onError"
-       data-theme="dark">
+  <div class="turnstile-container">
+    <div
+      class="cf-turnstile"
+      id="turnstile"
+      data-sitekey="0x4AAAAAACGINCrrNuJt2Mlw"
+      data-callback="onHuman"
+      data-error-callback="onError"
+      data-theme="dark">
+    </div>
   </div>
 
   <script>
-    // success
+    let retryTimer = null;
+    let redirecting = false;
+
+    /*
+     * Turnstile succeeded
+     */
     function onHuman(token) {
+      if (redirecting) return;
+
+      redirecting = true;
+
+      clearTimeout(retryTimer);
+
       document.getElementById('spinner').style.display = 'none';
+      document.getElementById('error-x').style.display = 'none';
+
       document.getElementById('msg').textContent = 'Access Granted!';
-      setTimeout(() => window.location.href = "plug.html", 800);
+
+      setTimeout(() => {
+        window.location.href = 'plug.html';
+      }, 800);
     }
 
-    // fail
+    /*
+     * Turnstile encountered an error.
+     *
+     * Instead of permanently denying access,
+     * automatically reset and try again.
+     */
     function onError(err) {
-      document.getElementById('spinner').style.display = 'none';
-      document.getElementById('msg').textContent = 'Access Denied';
-      document.getElementById('error-x').style.display = 'block';
-      console.error("Turnstile error:", err);
+      if (redirecting) return;
+
+      console.error('Turnstile error:', err);
+
+      const spinner = document.getElementById('spinner');
+      const errorX = document.getElementById('error-x');
+      const msg = document.getElementById('msg');
+
+      spinner.style.display = 'none';
+      errorX.style.display = 'block';
+
+      msg.textContent = 'Verification failed. Retrying…';
+
+      /*
+       * Wait 2 seconds before trying again.
+       */
+      clearTimeout(retryTimer);
+
+      retryTimer = setTimeout(() => {
+        retryTurnstile();
+      }, 2000);
+    }
+
+    /*
+     * Reset Turnstile and start another attempt.
+     */
+    function retryTurnstile() {
+      if (redirecting) return;
+
+      const spinner = document.getElementById('spinner');
+      const errorX = document.getElementById('error-x');
+      const msg = document.getElementById('msg');
+
+      errorX.style.display = 'none';
+      spinner.style.display = 'block';
+
+      msg.textContent = 'Making sure you’re not a bot…';
+
+      /*
+       * Reset the existing Turnstile widget.
+       */
+      if (
+        typeof turnstile !== 'undefined' &&
+        document.getElementById('turnstile')
+      ) {
+        try {
+          turnstile.reset('#turnstile');
+        } catch (e) {
+          console.error('Could not reset Turnstile:', e);
+        }
+      }
     }
   </script>
 
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <script
+    src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+    async
+    defer>
+  </script>
+
 </body>
 </html>
